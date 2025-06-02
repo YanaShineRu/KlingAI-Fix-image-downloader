@@ -16,78 +16,94 @@
 (function() {
     'use strict';
 
-    // Function to handle image download
+    // Функция загрузки изображения с помощью GM_download
     function downloadImage(url) {
-        const filename = url.split('/').pop().split('?')[0];
-        GM_download({
-            url: url,
-            name: filename,
-            onload: function() {
-                console.log('Image downloaded:', filename);
-            },
-            onerror: function(e) {
-                console.error('Download failed:', e);
-                // Fallback method if GM_download fails
-                fallbackDownload(url, filename);
-            }
-        });
+        try {
+            const filename = url.split('/').pop().split('?')[0] || 'image.jpg';
+            GM_download({
+                url: url,
+                name: filename,
+                onload: () => console.log('Image downloaded:', filename),
+                onerror: (err) => {
+                    console.error('GM_download failed:', err);
+                    fallbackDownload(url, filename);
+                }
+            });
+        } catch (err) {
+            console.error('downloadImage error:', err);
+            // Если GM_download не доступен
+            fallbackDownload(url, 'image.jpg');
+        }
     }
 
-    // Fallback download method using FileSaver.js
+    // Фоллбэк загрузка через GM_xmlhttpRequest и FileSaver.js (если saveAs доступен)
     function fallbackDownload(url, filename) {
         GM_xmlhttpRequest({
             method: "GET",
             url: url,
             responseType: "blob",
             onload: function(response) {
-                const blob = new Blob([response.response], {type: response.response.type});
-                saveAs(blob, filename);
+                try {
+                    const blob = new Blob([response.response], {type: response.response.type || 'image/jpeg'});
+                    if (typeof saveAs === 'function') {
+                        saveAs(blob, filename);
+                    } else {
+                        // Если saveAs не доступен, создать ссылку и кликнуть по ней
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        link.remove();
+                        URL.revokeObjectURL(link.href);
+                    }
+                } catch(e) {
+                    console.error('Fallback download failed:', e);
+                    // Последний фоллбэк - открыть картинку в новой вкладке с уникальным именем окна
+                    const winName = 'download_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                    window.open(url, winName);
+                }
             },
             onerror: function(e) {
-                console.error('Fallback download failed:', e);
-                // Final fallback - open in new tab
-                window.open(url, '_blank');
+                console.error('GM_xmlhttpRequest error:', e);
+                const winName = 'download_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                window.open(url, winName);
             }
         });
     }
 
-    // Function to modify download buttons
+    // Модификация кнопок загрузки
     function modifyDownloadButtons() {
-        // Find all download buttons
+        // Поиск кнопок с иконкой загрузки (xlink:href или href)
         const downloadButtons = document.querySelectorAll('[xlink\\:href="#icon-download"], [href="#icon-download"]');
-
         downloadButtons.forEach(button => {
-            // Check if we've already modified this button
             if (button.getAttribute('data-modified') === 'true') return;
 
-            // Find the closest image associated with this button
-            let container = button.closest('[style*="position: relative"]');
+            // Ищем контейнер с относительным позиционированием
+            const container = button.closest('[style*="position: relative"]');
             if (!container) return;
 
+            // Ищем картинку с классом content
             const img = container.querySelector('img.content');
             if (!img || !img.src) return;
 
-            // Add click handler
-            button.addEventListener('click', function(e) {
+            button.addEventListener('click', e => {
                 e.preventDefault();
                 e.stopPropagation();
                 downloadImage(img.src);
             });
 
-            // Mark as modified
             button.setAttribute('data-modified', 'true');
         });
     }
 
-    // Function to modify image click behavior
+    // Модификация клика по изображениям для загрузки
     function modifyImageClickBehavior() {
         const images = document.querySelectorAll('img.content[src^="https://s"]');
         images.forEach(img => {
-            // Check if we've already modified this image
             if (img.getAttribute('data-click-modified') === 'true') return;
 
-            img.addEventListener('click', function(e) {
-                // Check if the click was on the image itself (not a child element)
+            img.addEventListener('click', e => {
                 if (e.target === img) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -95,32 +111,30 @@
                 }
             });
 
-            // Mark as modified
             img.setAttribute('data-click-modified', 'true');
         });
     }
 
-    // Run the functions initially
-    modifyDownloadButtons();
-    modifyImageClickBehavior();
-
-    // Use MutationObserver to handle dynamically loaded content
-    const observer = new MutationObserver(function(mutations) {
+    // Инициализация
+    function init() {
         modifyDownloadButtons();
         modifyImageClickBehavior();
+    }
+
+    // Запускаем при загрузке
+    init();
+
+    // Наблюдатель за динамическими изменениями DOM
+    const observer = new MutationObserver(() => {
+        init();
     });
 
-    // Start observing the document with the configured parameters
     observer.observe(document.body, {
         childList: true,
         subtree: true,
-        attributes: false,
-        characterData: false
     });
 
-    // Also run periodically as a fallback
-    setInterval(() => {
-        modifyDownloadButtons();
-        modifyImageClickBehavior();
-    }, 2000);
+    // Резервный интервал на случай пропуска мутаций
+    setInterval(init, 2000);
+
 })();
