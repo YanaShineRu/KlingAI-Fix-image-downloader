@@ -12,48 +12,51 @@
 (function () {
     'use strict';
 
-    document.addEventListener('click', async function (e) {
+    document.addEventListener('click', async function(e) {
         const button = e.target.closest('button');
         if (!button) return;
 
-        const icon = button.querySelector('use[href="#icon-download"]');
-        if (!icon) return;
+        if (!button.querySelector('use[href="#icon-download"]')) return;
 
         e.preventDefault();
         e.stopPropagation();
 
-        // Находим ближайшее изображение в DOM
-        const container = button.closest('[data-v-102c185f]');
-        if (!container) return;
+        let container = button.closest('div');
+
+        while(container && !container.querySelector('img.content')) {
+            container = container.parentElement;
+        }
+        if (!container) {
+            alert('Не удалось найти изображение рядом с кнопкой');
+            return;
+        }
 
         const img = container.querySelector('img.content');
-        if (!img || !img.src) return;
+        if (!img || !img.src) {
+            alert('Изображение не найдено');
+            return;
+        }
 
         try {
             let url = img.src.split('?')[0];
 
-            const fileName = url.split('/').pop().split(':')[0]; // удаляем все после ":" (если есть)
+            let fileName = url.split('/').pop().split(':')[0] || 'image.webp';
 
-            const response = await fetch(url, {
-                headers: {
-                    'Referer': location.href
-                }
-            });
-
+            const response = await fetch(url, { headers: { 'Referer': location.href } });
             if (!response.ok) throw new Error(`Ошибка загрузки: ${response.status}`);
 
             const blob = await response.blob();
 
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = fileName || 'image.webp';
+            a.download = fileName;
             document.body.appendChild(a);
             a.click();
             a.remove();
             URL.revokeObjectURL(a.href);
-        } catch (err) {
-            console.error('[Kling Downloader] Ошибка:', err);
-            alert('Не удалось скачать изображение. См. консоль (F12).');
+        } catch(err) {
+            console.error(err);
+            alert('Ошибка при скачивании изображения, см. консоль');
         }
     }, true);
 })();
