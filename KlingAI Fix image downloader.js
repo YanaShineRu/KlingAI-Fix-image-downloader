@@ -3,7 +3,7 @@
 // @namespace    https://github.com/YanaShineRu/KlingAI-Fix-image-downloader
 // @version      0.0.1
 // @icon         https://vifo.ru/icons/icon.ico
-// @description  KlingAI Fix image downloader
+// @description  Автоматическая загрузка изображений вместо открытия в окне (включая динамически загружаемые)
 // @author       YanaShine
 // @match        *://*/*
 // @grant        none
@@ -12,65 +12,51 @@
 (function () {
     'use strict';
 
-    const handleDownload = async (button) => {
-        const timeout = 2000;
-        const interval = 100;
-        let waited = 0;
-        let image = null;
+    // Функция скачивания изображения по URL
+    function downloadImage(url) {
+        const a = document.createElement('a');
+        a.href = url;
+        const fileName = decodeURIComponent(url.split('/').pop().split('?')[0]) || `image-${Date.now()}.png`;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
 
-        while (waited < timeout) {
-            const images = Array.from(document.querySelectorAll('img[src]')).filter(img =>
-                img.offsetWidth > 50 &&
-                img.offsetHeight > 50 &&
-                isVisible(img) &&
-                !img.closest('.top-right-actions')
-            );
-
-            if (images.length > 0) {
-                image = images[0];
-                break;
-            }
-
-            await new Promise(r => setTimeout(r, interval));
-            waited += interval;
+    // Функция поиска ближайшего изображения относительно элемента (кнопки)
+    function findClosestImageSrc(element) {
+        let container = element;
+        for (let i = 0; i < 5; i++) {
+            if (!container) break;
+            const img = container.querySelector('img');
+            if (img && img.src) return img.src;
+            container = container.parentElement;
         }
+        const imgs = document.querySelectorAll('img[class^="stream-reference-image-target"]');
+        if (imgs.length) return imgs[0].src;
+        return null;
+    }
 
-        if (image) {
-            const a = document.createElement('a');
-            a.href = image.src;
-            const ext = image.src.split('.').pop().split(/\#|\?/)[0] || 'jpg';
-            a.download = `image-${Date.now()}.${ext}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        } else {
-            console.warn('❌ Не удалось найти изображение.');
-        }
-    };
-
-    const isVisible = (el) => {
-        const style = window.getComputedStyle(el);
-        return el.offsetWidth > 0 && el.offsetHeight > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-    };
-
-    const processButtons = () => {
-        const uses = document.querySelectorAll('use[xlink\\:href="#icon-download"]');
-        uses.forEach(use => {
-            const btn = use.closest('button');
-            if (btn && !btn.classList.contains('fix-download-attached')) {
-                btn.classList.add('fix-download-attached');
-                btn.addEventListener('click', (e) => {
+    // Перехват клика по кнопкам скачивания
+    document.body.addEventListener('click', function(e) {
+        let el = e.target;
+        while (el && el !== document.body) {
+            if (el.tagName === 'BUTTON') {
+                const useElem = el.querySelector('use[xlink\\:href="#icon-download"]');
+                if (useElem) {
+                    e.preventDefault();
                     e.stopPropagation();
-                    setTimeout(() => handleDownload(btn), 200); // небольшой отложенный запуск
-                });
+                    const src = findClosestImageSrc(el);
+                    if (src) {
+                        downloadImage(src);
+                    } else {
+                        console.warn('Картинка для скачивания не найдена');
+                    }
+                    return;
+                }
             }
-        });
-    };
+            el = el.parentElement;
+        }
+    }, true);
 
-    const observer = new MutationObserver(() => {
-        processButtons();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    processButtons();
 })();
