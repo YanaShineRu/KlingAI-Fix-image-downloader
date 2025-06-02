@@ -3,7 +3,7 @@
 // @namespace    https://github.com/YanaShineRu/KlingAI-Fix-image-downloader
 // @version      0.0.1
 // @icon         https://vifo.ru/icons/icon.ico
-// @description  Автоматическая загрузка изображений вместо открытия в окне
+// @description  KlingAI Fix image downloader
 // @author       YanaShine
 // @match        *://*/*
 // @grant        none
