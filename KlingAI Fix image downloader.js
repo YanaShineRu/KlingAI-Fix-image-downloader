@@ -16,125 +16,215 @@
 (function() {
     'use strict';
 
-    // Функция загрузки изображения с помощью GM_download
-    function downloadImage(url) {
-        try {
-            const filename = url.split('/').pop().split('?')[0] || 'image.jpg';
-            GM_download({
-                url: url,
-                name: filename,
-                onload: () => console.log('Image downloaded:', filename),
-                onerror: (err) => {
-                    console.error('GM_download failed:', err);
-                    fallbackDownload(url, filename);
-                }
-            });
-        } catch (err) {
-            console.error('downloadImage error:', err);
-            // Если GM_download не доступен
-            fallbackDownload(url, 'image.jpg');
-        }
+    // Конфигурация
+    const CONFIG = {
+        downloadDelay: 800,       // Задержка между загрузками (мс)
+        maxParallelDownloads: 1,  // Максимум одновременных загрузок
+        retryCount: 3,            // Количество попыток при ошибке
+        retryDelay: 1000          // Задержка между попытками
+    };
+
+    // Очередь загрузок и текущие активные загрузки
+    let downloadQueue = [];
+    let activeDownloads = 0;
+
+    // Функция для добавления в очередь
+    function enqueueDownload(url, filename, retries = 0) {
+        downloadQueue.push({ url, filename, retries });
+        processQueue();
     }
 
-    // Фоллбэк загрузка через GM_xmlhttpRequest и FileSaver.js (если saveAs доступен)
-    function fallbackDownload(url, filename) {
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: url,
-            responseType: "blob",
-            onload: function(response) {
-                try {
-                    const blob = new Blob([response.response], {type: response.response.type || 'image/jpeg'});
-                    if (typeof saveAs === 'function') {
-                        saveAs(blob, filename);
+    // Обработка очереди
+    function processQueue() {
+        if (activeDownloads >= CONFIG.maxParallelDownloads || downloadQueue.length === 0) {
+            return;
+        }
+
+        activeDownloads++;
+        const { url, filename, retries } = downloadQueue.shift();
+
+        downloadWithRetry(url, filename, retries)
+            .finally(() => {
+                activeDownloads--;
+                setTimeout(processQueue, CONFIG.downloadDelay);
+            });
+    }
+
+    // Загрузка с повторными попытками
+    function downloadWithRetry(url, filename, retries) {
+        return new Promise((resolve) => {
+            attemptDownload(url, filename)
+                .then(() => resolve())
+                .catch((error) => {
+                    console.error(`Download failed (${retries + 1}/${CONFIG.retryCount}):`, error);
+                    if (retries < CONFIG.retryCount - 1) {
+                        setTimeout(() => {
+                            enqueueDownload(url, filename, retries + 1);
+                            resolve();
+                        }, CONFIG.retryDelay);
                     } else {
-                        // Если saveAs не доступен, создать ссылку и кликнуть по ней
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = filename;
-                        document.body.appendChild(link);
-                        link.click();
-                        link.remove();
-                        URL.revokeObjectURL(link.href);
+                        console.error('All download attempts failed, opening in new tab');
+                        window.open(url, '_blank');
+                        resolve();
                     }
-                } catch(e) {
-                    console.error('Fallback download failed:', e);
-                    // Последний фоллбэк - открыть картинку в новой вкладке с уникальным именем окна
-                    const winName = 'download_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-                    window.open(url, winName);
-                }
-            },
-            onerror: function(e) {
-                console.error('GM_xmlhttpRequest error:', e);
-                const winName = 'download_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-                window.open(url, winName);
+                });
+        });
+    }
+
+    // Основная функция загрузки
+    function attemptDownload(url, filename) {
+        return new Promise((resolve, reject) => {
+            try {
+                GM_download({
+                    url: url,
+                    name: filename,
+                    onload: () => {
+                        console.log('Image downloaded:', filename);
+                        resolve();
+                    },
+                    onerror: (err) => {
+                        console.error('GM_download failed:', err);
+                        fallbackDownload(url, filename)
+                            .then(resolve)
+                            .catch(reject);
+                    }
+                });
+            } catch (err) {
+                console.error('GM_download not available:', err);
+                fallbackDownload(url, filename)
+                    .then(resolve)
+                    .catch(reject);
             }
         });
     }
 
-    // Модификация кнопок загрузки
-    function modifyDownloadButtons() {
-        // Поиск кнопок с иконкой загрузки (xlink:href или href)
-        const downloadButtons = document.querySelectorAll('[xlink\\:href="#icon-download"], [href="#icon-download"]');
-        downloadButtons.forEach(button => {
-            if (button.getAttribute('data-modified') === 'true') return;
+    // Фоллбэк загрузка
+    function fallbackDownload(url, filename) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: url,
+                responseType: "blob",
+                onload: function(response) {
+                    try {
+                        const blob = new Blob([response.response], {
+                            type: response.response.type || 'image/jpeg'
+                        });
 
-            // Ищем контейнер с относительным позиционированием
-            const container = button.closest('[style*="position: relative"]');
-            if (!container) return;
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = filename;
+                        link.style.display = 'none';
+                        document.body.appendChild(link);
+                        link.click();
 
-            // Ищем картинку с классом content
-            const img = container.querySelector('img.content');
-            if (!img || !img.src) return;
-
-            button.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                downloadImage(img.src);
-            });
-
-            button.setAttribute('data-modified', 'true');
-        });
-    }
-
-    // Модификация клика по изображениям для загрузки
-    function modifyImageClickBehavior() {
-        const images = document.querySelectorAll('img.content[src^="https://s"]');
-        images.forEach(img => {
-            if (img.getAttribute('data-click-modified') === 'true') return;
-
-            img.addEventListener('click', e => {
-                if (e.target === img) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    downloadImage(img.src);
+                        setTimeout(() => {
+                            document.body.removeChild(link);
+                            URL.revokeObjectURL(link.href);
+                            resolve();
+                        }, 100);
+                    } catch(e) {
+                        reject(e);
+                    }
+                },
+                onerror: function(e) {
+                    reject(e);
                 }
             });
-
-            img.setAttribute('data-click-modified', 'true');
         });
     }
 
-    // Инициализация
+    // Генерация имени файла
+    function generateFilename(url) {
+        const base = url.split('/').pop().split('?')[0] || 'image';
+        const cleanName = base.replace(/[^a-z0-9.-]/gi, '_');
+        return `kling_${Date.now()}_${cleanName}`.substring(0, 80);
+    }
+
+    // Обработчик кликов для кнопок
+    function handleDownloadClick(imgSrc, e) {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+        }
+
+        const filename = generateFilename(imgSrc);
+        enqueueDownload(imgSrc, filename);
+    }
+
+    // Модификация кнопок загрузки
+    function modifyDownloadButtons() {
+        const downloadButtons = document.querySelectorAll(
+            '[xlink\\:href="#icon-download"], [href="#icon-download"], [class*="download"]'
+        );
+
+        downloadButtons.forEach(button => {
+            if (button._klingModified) return;
+            button._klingModified = true;
+
+            const container = button.closest('[style*="position: relative"], [data-v-]');
+            if (!container) return;
+
+            const img = container.querySelector('img.content[src^="http"]');
+            if (!img || !img.src) return;
+
+            button.addEventListener('click', (e) => handleDownloadClick(img.src, e), true);
+        });
+    }
+
+    // Модификация кликов по изображениям
+    function modifyImageClickBehavior() {
+        const images = document.querySelectorAll('img.content[src^="http"]');
+
+        images.forEach(img => {
+            if (img._klingModified) return;
+            img._klingModified = true;
+
+            img.addEventListener('click', (e) => {
+                if (e.target === img) {
+                    handleDownloadClick(img.src, e);
+                }
+            }, true);
+        });
+    }
+
+    // Инициализация и наблюдение за DOM
     function init() {
         modifyDownloadButtons();
         modifyImageClickBehavior();
     }
 
-    // Запускаем при загрузке
-    init();
+    // Запуск при загрузке
+    document.addEventListener('DOMContentLoaded', init);
 
-    // Наблюдатель за динамическими изменениями DOM
-    const observer = new MutationObserver(() => {
-        init();
+    // Наблюдатель за изменениями DOM
+    const observer = new MutationObserver((mutations) => {
+        let needsCheck = false;
+
+        mutations.forEach(mutation => {
+            if (mutation.addedNodes.length > 0) {
+                needsCheck = true;
+            }
+        });
+
+        if (needsCheck) {
+            setTimeout(init, 500);
+        }
     });
 
     observer.observe(document.body, {
         childList: true,
-        subtree: true,
+        subtree: true
     });
 
-    // Резервный интервал на случай пропуска мутаций
-    setInterval(init, 2000);
+    // Периодическая проверка
+    setInterval(init, 3000);
 
+    // Уведомление о запуске
+    GM_notification({
+        title: 'KlingAI Downloader Activated',
+        text: 'Image downloader is ready to use',
+        silent: true
+    });
 })();
