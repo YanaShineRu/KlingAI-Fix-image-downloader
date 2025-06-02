@@ -13,7 +13,6 @@
     'use strict';
 
     const observer = new MutationObserver(() => {
-        // Находим кнопку по иконке #icon-download
         const downloadIcons = document.querySelectorAll('use[xlink\\:href="#icon-download"]');
         downloadIcons.forEach(use => {
             const button = use.closest('button');
@@ -23,19 +22,18 @@
                     e.preventDefault();
                     e.stopPropagation();
 
-                    // Поиск ближайшего изображения в контейнере
-                    let container = button.closest('.top-right-actions');
-                    while (container && !container.parentElement.querySelector('img')) {
-                        container = container.parentElement;
-                    }
+                    let root = button.closest('[class*="card"], [class*="item"], [class*="content"]');
+                    if (!root) root = button.closest('div');
 
-                    const img = container?.parentElement?.querySelector('img');
+                    const img = root?.querySelector('img[src]');
 
                     if (img && img.src) {
                         const link = document.createElement('a');
                         link.href = img.src;
-                        const extension = img.src.split('.').pop().split(/\#|\?/)[0];
+
+                        const extension = img.src.split('.').pop().split(/\#|\?/)[0] || 'jpg';
                         const filename = `image-${Date.now()}.${extension}`;
+
                         link.download = filename;
                         document.body.appendChild(link);
                         link.click();
