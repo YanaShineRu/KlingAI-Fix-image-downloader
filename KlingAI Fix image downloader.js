@@ -3,7 +3,7 @@
 // @namespace    https://github.com/YanaShineRu/KlingAI-Fix-image-downloader
 // @version      0.0.1
 // @icon         https://vifo.ru/icons/icon.ico
-// @description  Автоматическая загрузка изображений вместо открытия в окне (включая динамически загружаемые)
+// @description  Автоматическая загрузка изображений по кнопке с иконкой download (в т.ч. с динамическими src)
 // @author       YanaShine
 // @match        *://*/*
 // @grant        none
@@ -12,51 +12,48 @@
 (function () {
     'use strict';
 
-    // Функция скачивания изображения по URL
-    function downloadImage(url) {
-        const a = document.createElement('a');
-        a.href = url;
-        const fileName = decodeURIComponent(url.split('/').pop().split('?')[0]) || `image-${Date.now()}.png`;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    }
+    document.addEventListener('click', async function (e) {
+        const button = e.target.closest('button');
+        if (!button) return;
 
-    // Функция поиска ближайшего изображения относительно элемента (кнопки)
-    function findClosestImageSrc(element) {
-        let container = element;
-        for (let i = 0; i < 5; i++) {
-            if (!container) break;
-            const img = container.querySelector('img');
-            if (img && img.src) return img.src;
-            container = container.parentElement;
-        }
-        const imgs = document.querySelectorAll('img[class^="stream-reference-image-target"]');
-        if (imgs.length) return imgs[0].src;
-        return null;
-    }
+        const icon = button.querySelector('use[href="#icon-download"]');
+        if (!icon) return;
 
-    // Перехват клика по кнопкам скачивания
-    document.body.addEventListener('click', function(e) {
-        let el = e.target;
-        while (el && el !== document.body) {
-            if (el.tagName === 'BUTTON') {
-                const useElem = el.querySelector('use[xlink\\:href="#icon-download"]');
-                if (useElem) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const src = findClosestImageSrc(el);
-                    if (src) {
-                        downloadImage(src);
-                    } else {
-                        console.warn('Картинка для скачивания не найдена');
-                    }
-                    return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Находим ближайшее изображение в DOM
+        const container = button.closest('[data-v-102c185f]');
+        if (!container) return;
+
+        const img = container.querySelector('img.content');
+        if (!img || !img.src) return;
+
+        try {
+            let url = img.src.split('?')[0];
+
+            const fileName = url.split('/').pop().split(':')[0]; // удаляем все после ":" (если есть)
+
+            const response = await fetch(url, {
+                headers: {
+                    'Referer': location.href
                 }
-            }
-            el = el.parentElement;
+            });
+
+            if (!response.ok) throw new Error(`Ошибка загрузки: ${response.status}`);
+
+            const blob = await response.blob();
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName || 'image.webp';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(a.href);
+        } catch (err) {
+            console.error('[Kling Downloader] Ошибка:', err);
+            alert('Не удалось скачать изображение. См. консоль (F12).');
         }
     }, true);
-
 })();
