@@ -1,62 +1,126 @@
 // ==UserScript==
-// @name         KlingAI Fix image downloader
+// @name         KlingAI Fix Image Downloader
 // @namespace    https://github.com/YanaShineRu/KlingAI-Fix-image-downloader
 // @version      0.0.1
 // @icon         https://vifo.ru/icons/icon.ico
-// @description  Автоматическая загрузка изображений по кнопке с иконкой download (в т.ч. с динамическими src)
+// @description  Принудительная загрузка изображений по кнопке download
 // @author       YanaShine
-// @match        *://*/*
-// @grant        none
+// @match        https://app.klingai.com/*
+// @grant        GM_download
+// @grant        GM_xmlhttpRequest
+// @connect      klingai.com
+// @require      https://greasyfork.org/scripts/12228/code/setMutationHandler.js
+// @run-at       document-start
 // ==/UserScript==
 
-(function () {
+(function() {
     'use strict';
 
-    document.addEventListener('click', async function(e) {
-        const button = e.target.closest('button');
-        if (!button) return;
+    // Function to handle image download
+    function downloadImage(url) {
+        const filename = url.split('/').pop().split('?')[0];
+        GM_download({
+            url: url,
+            name: filename,
+            onload: function() {
+                console.log('Image downloaded:', filename);
+            },
+            onerror: function(e) {
+                console.error('Download failed:', e);
+                // Fallback method if GM_download fails
+                fallbackDownload(url, filename);
+            }
+        });
+    }
 
-        if (!button.querySelector('use[href="#icon-download"]')) return;
+    // Fallback download method using FileSaver.js
+    function fallbackDownload(url, filename) {
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: url,
+            responseType: "blob",
+            onload: function(response) {
+                const blob = new Blob([response.response], {type: response.response.type});
+                saveAs(blob, filename);
+            },
+            onerror: function(e) {
+                console.error('Fallback download failed:', e);
+                // Final fallback - open in new tab
+                window.open(url, '_blank');
+            }
+        });
+    }
 
-        e.preventDefault();
-        e.stopPropagation();
+    // Function to modify download buttons
+    function modifyDownloadButtons() {
+        // Find all download buttons
+        const downloadButtons = document.querySelectorAll('[xlink\\:href="#icon-download"], [href="#icon-download"]');
 
-        let container = button.closest('div');
+        downloadButtons.forEach(button => {
+            // Check if we've already modified this button
+            if (button.getAttribute('data-modified') === 'true') return;
 
-        while(container && !container.querySelector('img.content')) {
-            container = container.parentElement;
-        }
-        if (!container) {
-            alert('Не удалось найти изображение рядом с кнопкой');
-            return;
-        }
+            // Find the closest image associated with this button
+            let container = button.closest('[style*="position: relative"]');
+            if (!container) return;
 
-        const img = container.querySelector('img.content');
-        if (!img || !img.src) {
-            alert('Изображение не найдено');
-            return;
-        }
+            const img = container.querySelector('img.content');
+            if (!img || !img.src) return;
 
-        try {
-            let url = img.src.split('?')[0];
+            // Add click handler
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                downloadImage(img.src);
+            });
 
-            let fileName = url.split('/').pop().split(':')[0] || 'image.webp';
+            // Mark as modified
+            button.setAttribute('data-modified', 'true');
+        });
+    }
 
-            const response = await fetch(url, { headers: { 'Referer': location.href } });
-            if (!response.ok) throw new Error(`Ошибка загрузки: ${response.status}`);
+    // Function to modify image click behavior
+    function modifyImageClickBehavior() {
+        const images = document.querySelectorAll('img.content[src^="https://s"]');
+        images.forEach(img => {
+            // Check if we've already modified this image
+            if (img.getAttribute('data-click-modified') === 'true') return;
 
-            const blob = await response.blob();
+            img.addEventListener('click', function(e) {
+                // Check if the click was on the image itself (not a child element)
+                if (e.target === img) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    downloadImage(img.src);
+                }
+            });
 
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(a.href);
-        } catch(err) {
-            console.error(err);
-            alert('Ошибка при скачивании изображения, см. консоль');
-        }
-    }, true);
+            // Mark as modified
+            img.setAttribute('data-click-modified', 'true');
+        });
+    }
+
+    // Run the functions initially
+    modifyDownloadButtons();
+    modifyImageClickBehavior();
+
+    // Use MutationObserver to handle dynamically loaded content
+    const observer = new MutationObserver(function(mutations) {
+        modifyDownloadButtons();
+        modifyImageClickBehavior();
+    });
+
+    // Start observing the document with the configured parameters
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: false,
+        characterData: false
+    });
+
+    // Also run periodically as a fallback
+    setInterval(() => {
+        modifyDownloadButtons();
+        modifyImageClickBehavior();
+    }, 2000);
 })();
