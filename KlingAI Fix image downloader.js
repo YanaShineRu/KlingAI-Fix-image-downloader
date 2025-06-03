@@ -10,6 +10,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      klingai.com
 // @require      https://greasyfork.org/scripts/12228/code/setMutationHandler.js
+// @updateURL    https://raw.githubusercontent.com/YanaShineRu/KlingAI-Fix-image-downloader/main/KlingAI%20Fix%20image%20downloader.js
+// @downloadURL  https://raw.githubusercontent.com/YanaShineRu/KlingAI-Fix-image-downloader/main/KlingAI%20Fix%20image%20downloader.js
 // @run-at       document-start
 // ==/UserScript==
 
